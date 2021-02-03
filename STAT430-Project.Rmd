@@ -1,0 +1,656 @@
+---
+title: "STAT 430 Final Project"
+author: "Shuk Ying Leung and Muuzaani Nkhoma"
+date: "April 27, 2019"
+output: html_document
+---
+
+Source: https://archive.ics.uci.edu/ml/datasets/Geographical+Original+of+Music
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(tidyverse)                # For data manipulation
+library(cluster)                  # For clustering algorithms
+library(factoextra)               # For visualization
+library(dendextend)               # For comparing two dendrograms
+library(magrittr)                 # For piping
+library(class)                    # For classification
+library(kknn)                     # For K-Nearest Neighbors Analysis
+library(e1071)                    # For Naive Bayes Algorithm
+
+# functions needed for this assignment -----------------------------------
+misclass = function(predicted, actual) {
+  # fit = predicted class labels
+  # y = actual class labels
+  
+  temp <- table(predicted, actual) # make the misclassification table
+  
+  cat("Table of Misclassification\n") # add text to the eventual output
+  cat("(row = predicted, col = actual)\n") # add text to the eventual output
+  print(temp) # print the misclassification table as output
+  cat("\n\n")
+  
+  numcor <- sum(diag(temp)) # number of correct classifications
+  numinc <- length(actual) - numcor # number of incorrect classifications
+  mcr <- numinc/length(actual) # misclassification rate
+  cat(paste("Misclassification Rate = ",format(mcr,digits=3)))
+  cat("\n")
+}
+
+kknn.cv <- function(X, y, B = 100, p = 0.25, k = 3, kern = "rectangular") {
+  # X = ALL predictors (test and train)
+  # y = ALL actual group/class labels (test and train)
+  # B = number of times to average cross-validation results
+  # p = proportion to leave out for test cases
+  # k = number of nearest neighbors to use in kknn(k = k)
+  # kern = weight function used in kknn(kernel = "kern")
+  
+  y <- as.factor(y) # make sure our labels are being interpretted as categorical
+  data_all <- data.frame(y, X) # the entire data set, ensures that the first column is the categ. response
+  n <- length(y)
+  
+  cv <- numeric(B) # empty vector to store cross-validation results
+  
+  leaveout <- floor(n*p) # number of test cases
+  
+  # perform the following methods B separate times
+  for (ii in 1:B) {
+    test_cases <- sample(1:n, leaveout, replace = F) # sample the test cases
+    data_test <- data_all[test_cases,] # test data
+    data_train <- data_all[-test_cases,] # training data; leaves out the test cases
+    
+    fit.kknn <- kknn(y ~ ., train = data_train, test = data_test, k = k, kernel = kern) # fit model
+    pred <- as.factor(fitted(fit.kknn)) # extract fitted values from "genre.kknn"
+    
+    tab <- table(pred, data_test[,1]) # 
+    mc <- leaveout - sum(diag(tab)) # number misclassified
+    
+    cv[ii] <- mc/leaveout # stores the B misclassification rate
+  }
+  
+  return(cv) # output is a vector of B misclassification rates from the cross-validation process
+}
+
+nb.cv = function(X, y, B = 100, p = 0.25, laplace = 0) {
+  # X = ALL predictors (test and train)
+  # y = ALL actual group/class labels (test and train)
+  # B = number of times to average cross-validation results
+  # p = proportion to leave out for test cases
+  
+  y <- as.factor(y) # make sure our labels are being interpretted as categorical
+  data_all <- data.frame(y, X) # the entire data set, ensures that the first column is the categ. response
+  n <- length(y)
+  
+  cv <- numeric(B) # empty vector to store results
+  
+  leaveout <- floor(n*p) # number of test cases
+  
+  for (ii in 1:B) {
+    test_cases <- sample(1:n, leaveout, replace = F) # sample the test cases
+    data_test <- data_all[test_cases,] # test data
+    data_train <- data_all[-test_cases,] # training data; leaves out the test cases
+    
+    fit.nb <- naiveBayes(y ~ ., data_train) # fit model
+    pred <- predict(fit.nb, newdata = data_test)
+    
+    tab <- table(pred, data_test[,1]) # 
+    mc <- leaveout - sum(diag(tab)) # number misclassified
+    
+    cv[ii] <- mc/leaveout # stores the B misclassification rate
+  }
+  
+  return(cv) # output is a vector of B misclassification rates from the cross-validation process
+  
+}
+
+```
+
+
+##  PART 1: CLUSTERING METHODS
+
+### HIERARCHICAL CLUSTERING  
+Note that agglomerative clustering is good at identifying small clusters. Divisive hierarchical clustering is good at identifying large clusters.
+
+#### Read, Explore, and Prepare the data
+
+```{r}
+Geo_Music_Orig_data <- read_excel("GEO_MUSIC_Orig with Countries 2.xlsx")
+
+
+dim(Geo_Music_Orig_data)
+ncol(Geo_Music_Orig_data)
+nrow(Geo_Music_Orig_data)
+names(Geo_Music_Orig_data)
+```
+
+#### View first observations
+
+```{r}
+head(Geo_Music_Orig_data)
+```
+
+#### View last observations
+
+```{r}
+tail(Geo_Music_Orig_data)
+```
+
+#### Summary Statistics
+
+```{r}
+summary(Geo_Music_Orig_data)
+```
+
+
+```{r}
+Geo_Music_Orig <- Geo_Music_Orig_data[ , -(117:125)]
+  
+```
+
+#### Distance Matrix
+
+```{r}
+# Dissimilarity matrix
+distanceMatrix <- dist(Geo_Music_Orig, method = "euclidean")
+
+fviz_dist(distanceMatrix, 
+   gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"), show_labels = FALSE)
+```
+
+
+#### Agglomerative Hierarchical Clustering
+
+```{r}
+
+# Hierarchical clustering using Complete Linkage
+hc1 <- hclust(distanceMatrix, method = "complete" )
+
+# Plot the obtained dendrogram
+plot(hc1, cex = 0.6, hang = -1)
+
+```
+
+
+##### Including Agglomerative Coefficient
+
+```{r}
+
+# Compute with agnes
+hc2 <- agnes(Geo_Music_Orig, method = "complete")
+
+# Agglomerative coefficient
+hc2$ac
+
+# Plot the obtained dendrogram
+pltree(hc2, cex = 0.6, hang = -1)
+
+```
+
+
+#### Model Assessment
+
+```{r}
+# methods to assess
+m <- c( "average", "single", "complete", "ward")
+names(m) <- c( "average", "single", "complete", "ward")
+
+# function to compute coefficient
+ac <- function(x) {
+  agnes(Geo_Music_Orig, method = x)$ac
+}
+
+map_dbl(m, ac)
+
+```
+
+
+#### Divisive Hierarchical Clustering
+
+
+```{r}
+# compute divisive hierarchical clustering
+hc4 <- diana(Geo_Music_Orig)
+
+# Divise coefficient; amount of clustering structure found
+hc4$dc
+
+# plot dendrogram
+pltree(hc4, cex = 0.6, hang = -1, main = "Dendrogram of diana")
+```
+
+#### PARTITIONING CLUSTERING
+
+##### Determining optimal number of clustering
+
+#### Gap Statistic
+
+```{r}
+
+fviz_nbclust(Geo_Music_Orig, kmeans, k.max = 50, method = "wss")
+```
+
+
+
+#### Elbow Method
+
+```{r}
+fviz_nbclust(Geo_Music_Orig, FUN = hcut, method = "wss", k.max = 50)
+```
+
+
+### K-MEANS CLUSTERING
+
+
+```{r}
+set.seed(123)
+km.res <- kmeans(Geo_Music_Orig, 6, nstart = 25)
+```
+
+
+#### Plot Clusters
+
+```{r}
+# Visualize
+library("factoextra")
+fviz_cluster(km.res, data = Geo_Music_Orig,
+             geom = c("point"),
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal())
+
+```
+
+
+```{r}
+set.seed(123)
+km.res <- kmeans(Geo_Music_Orig, 6, nstart = 25)
+fviz_cluster(km.res, data = Geo_Music_Orig)
+```
+
+
+#### CLUSTERING USING TOP CONTRIBUTING VARIABLES FROM FIRST TEN PRINCIPAL COMPONENTS
+
+```{r}
+Geo_Music_IV <- Geo_Music_Orig_data %>% dplyr::select( X2, X3, X4, X5, X6, X7, X8, X9, X11, X12, X30, X31, X32, X33, X34, X35, X59, X60, X61, X62, X64, X68, X69, X70, X71, X72, X73, X74, X88, X89, X90, X93, X97, X98, X99, X100, X101, X102, X103)
+
+  
+```
+
+
+```{r}
+set.seed(123)
+km.res1 <- kmeans(Geo_Music_IV, 6, nstart = 25)
+```
+
+
+#### Plot Clusters
+
+```{r}
+# Visualize
+library("factoextra")
+fviz_cluster(km.res1, data = Geo_Music_IV,
+             geom = "point",
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal())
+
+```
+
+
+```{r}
+
+fviz_cluster(km.res1, data = Geo_Music_IV)
+```
+
+
+#### USING k= 5
+
+```{r}
+set.seed(123)
+km.res <- kmeans(Geo_Music_Orig, 5, nstart = 25)
+```
+
+
+#### Plot Clusters
+
+```{r}
+# Visualize
+library("factoextra")
+fviz_cluster(km.res, data = Geo_Music_Orig,
+             geom = c("point"),
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal())
+
+```
+
+
+```{r}
+Geo_Music_Clusters <- cbind(Geo_Music_Orig_data, km.res$cluster) # combine the original data and the new predictions
+write.table(Geo_Music_Clusters, "Geo_Music_Clusters.csv", sep = ",", row.names = F) # save as a .csv file
+
+
+```
+
+
+
+
+
+## PART 2: CLASSIFICATION METHODS
+
+#### Read, Explore, and Prepare the data
+
+```{r}
+Geo_Music_Orig_Class <- Geo_Music_Orig_data[ , -(117:124)]
+Geo_Music_Orig_Class <- data.frame(Region=as.factor(Geo_Music_Orig_Class$Region), Geo_Music_Orig_Class[,1:116])
+
+
+dim(Geo_Music_Orig_Class)
+ncol(Geo_Music_Orig_Class)
+nrow(Geo_Music_Orig_Class)
+names(Geo_Music_Orig_Class)
+
+```
+
+#### DATA CLEANING
+
+```{r}
+Geo_Music_NCorrVar_Class <- Geo_Music_Orig_Class %>%
+  dplyr::select(Region, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11, X12, X13, X14, X15, X16, X17, X30, X31, X32, X33, X34, X35, X36, X37, X38, X39, X40, X41, X42, X43, X44, X45, X46, X59, X60, X61, X62, X63, X64, X65, X66, X67, X68, X69, X70, X71, X72, X73, X74, X75, X88, X89, X90, X91, X92, X93, X94, X95, X96, X97, X98, X99, X100, X101, X102, X103, X104)
+  
+```
+
+
+
+#### Partitioning the data
+
+```{r}
+set.seed(42) # this ensures you all have the same data!
+n <- nrow(Geo_Music_NCorrVar_Class)
+p <- 1/4
+testcases <- sample(1:n, floor(n*p),replace=F)
+Geo_Music_test <- Geo_Music_NCorrVar_Class[testcases,]
+Geo_Music_train <- Geo_Music_NCorrVar_Class[-testcases,]
+
+
+# Examine the dimensions
+dim(Geo_Music_train) # training cases
+dim(Geo_Music_test) # test cases
+dim(Geo_Music_NCorrVar_Class) # entire data set
+```
+
+### K- NEAREST NEIGHBORS
+
+#### Preliminary Model Performance
+
+```{r}
+Geo_Music_knn_fit <- train.kknn(
+  Region ~ .,
+  data = Geo_Music_NCorrVar_Class,
+  distance = 1,
+  kmax = 10,
+  kernel = c("rectangular", "triangular", "biweight", "triweight", "gaussian")
+)
+Geo_Music_knn_fit
+
+```
+
+
+```{r}
+plot(Geo_Music_knn_fit, main = "kNN Model Performance between  different Kernels")
+```
+
+
+##### Classification using the kknn() function with the rectangular kernel
+
+```{r}
+k_vector <- c(1:10)
+for (ii in 1:length(k_vector)){
+  Geo_Music.kknn <- kknn(Region ~ ., train = Geo_Music_train, test = Geo_Music_test, k = k_vector[ii], kernel = "rectangular")
+  pred <- as.factor(fitted(Geo_Music.kknn))
+  
+  cat("\n\n")
+  print(paste("kknn classifier with k =",k_vector[ii]), quote = FALSE)
+  misclass(pred, Geo_Music_test$Region)
+}
+
+```
+
+
+##### Classification using the kknn() function with the biweight kernel
+
+```{r}
+k_vector <- c(1:10)
+for (ii in 1:length(k_vector)){
+  Geo_Music.kknn <- kknn(Region ~ ., train = Geo_Music_train, test = Geo_Music_test, k = k_vector[ii], kernel = "biweight")
+  pred <- as.factor(fitted(Geo_Music.kknn))
+  
+  cat("\n\n")
+  print(paste("kknn classifier with k =",k_vector[ii]), quote = FALSE)
+  misclass(pred, Geo_Music_test$Region)
+}
+
+```
+
+
+##### Classification using the kknn() function with the triweight kernel
+
+
+```{r}
+k_vector <- c(1:10)
+for (ii in 1:length(k_vector)){
+  Geo_Music.kknn <- kknn(Region ~ ., train = Geo_Music_train, test = Geo_Music_test, k = k_vector[ii], kernel = "triweight")
+  pred <- as.factor(fitted(Geo_Music.kknn))
+  
+  cat("\n\n")
+  print(paste("kknn classifier with k =",k_vector[ii]), quote = FALSE)
+  misclass(pred, Geo_Music_test$Region)
+}
+
+```
+
+
+
+##### Classification using the kknn() function with the triangular kernel
+
+
+```{r}
+k_vector <- c(1:10)
+for (ii in 1:length(k_vector)){
+  Geo_Music.kknn <- kknn(Region ~ ., train = Geo_Music_train, test = Geo_Music_test, k = k_vector[ii], kernel = "triangular")
+  pred <- as.factor(fitted(Geo_Music.kknn))
+  
+  cat("\n\n")
+  print(paste("kknn classifier with k =",k_vector[ii]), quote = FALSE)
+  misclass(pred, Geo_Music_test$Region)
+}
+
+```
+
+
+##### Classification using the kknn() function with the gaussian kernel
+
+
+```{r}
+k_vector <- c(1:10)
+for (ii in 1:length(k_vector)){
+  Geo_Music.kknn <- kknn(Region ~ ., train = Geo_Music_train, test = Geo_Music_test, k = k_vector[ii], kernel = "gaussian")
+  pred <- as.factor(fitted(Geo_Music.kknn))
+  
+  cat("\n\n")
+  print(paste("kknn classifier with k =",k_vector[ii]), quote = FALSE)
+  misclass(pred, Geo_Music_test$Region)
+}
+
+```
+
+
+### kNN-MONTE CARLO CROSS VALIDATION
+
+```{r}
+# monte carlo cross validation
+Geo_Music_knncV <- kknn.cv(X = Geo_Music_NCorrVar_Class[,-1], y = Geo_Music_NCorrVar_Class$Region, B = 200, p = 0.20, k = 10, kern = "gaussian")
+summary(Geo_Music_knncV) # summary statistics for my B cross validation results
+
+```
+
+
+
+### NAIVE BAYES
+
+```{r}
+# classification using the naiveBayes() function
+Geo_Music_nB <- naiveBayes(Region ~ ., Geo_Music_train)
+pred_Geo_Music_nB <- predict(Geo_Music_nB, Geo_Music_test) # the predictions look a little different for kknn() when compared to sknn()
+misclass(pred_Geo_Music_nB, Geo_Music_test$Region) # confusion matrix and misclass. rate
+
+```
+
+
+```{r}
+# classification using the naiveBayes() function
+Geo_Music_nB1 <- naiveBayes(Region ~ ., Geo_Music_train, laplace = 1)
+pred_Geo_Music_nB1 <- predict(Geo_Music_nB1, Geo_Music_test) # the predictions look a little different for kknn() when compared to sknn()
+misclass(pred_Geo_Music_nB1, Geo_Music_test$Region) # confusion matrix and misclass. rate
+
+```
+
+
+### NAIVE BAYES-MONTE CARLO CROSS VALIDATION
+
+```{r}
+# monte carlo cross validation 
+Geo_Music_nBcV <- nb.cv(X = Geo_Music_NCorrVar_Class[, -1], y = Geo_Music_NCorrVar_Class$Region, B = 100, p = 0.25, laplace = 1)
+summary(Geo_Music_nBcV)
+
+```
+
+
+
+
+
+
+## PART 3: DISCRIMINANT ANALYSIS
+
+
+```{r}
+library(MASS)        # For Discriminant Analysis
+library(klaR)        # For Discriminant Analysis
+
+```
+
+
+
+#### Partitioning the data
+
+```{r}
+# Examine the dimensions
+dim(Geo_Music_train) # training cases
+dim( Geo_Music_test) # test cases
+dim(Geo_Music_NCorrVar_Class) # entire data set
+```
+
+
+### LINEAR DISCRIMINANT ANALYSIS
+
+
+```{r}
+# LDA model
+Geo_Music.lda = lda(Region ~ .,data = Geo_Music_train)
+yfit = predict(Geo_Music.lda, newdata = Geo_Music_train)
+attributes(yfit) # "x" stores the discriminants
+
+misclass(yfit$class, Geo_Music_train$Region)
+
+```
+
+
+#### Visualize the Discriminants
+
+```{r}
+# visualize with discriminants
+plot(yfit$x[,1],yfit$x[,2],type="n",xlab="First Discriminant",
+     ylab="Second Discriminant",main="D2 vs. D1 Region")
+text(yfit$x[,1],yfit$x[,2],as.character(yfit$class),col=as.numeric(yfit$class)+2,
+       cex=.35)
+
+```
+
+
+##### Scatterplot
+
+```{r}
+# Below is a function that will draw a scatterplot matrix with the points color coded 
+# by the factor/nominal variable that must be the first column of the argument to the function x.
+pairs.grps = function(x) {
+  pairs(x[,-1],pch=21,bg=as.numeric(as.factor(x[,1]))+2)
+}
+
+blah = cbind(Geo_Music_train$Region,yfit$x)
+pairs.grps(blah)
+
+```
+
+
+##### Predict New Cases
+
+```{r}
+# predict the test cases
+ypred = predict(Geo_Music.lda,newdata=Geo_Music_test)
+misclass(ypred$class,Geo_Music_test$Region)
+
+
+```
+
+
+
+### QUADRATIC LINEAR ANALYSIS
+
+```{r, eval = FALSE}
+# try QDA: different regions are assumed to have different var-cov structures
+Geo_Music.qda = qda(Region~.,data = Geo_Music_train)
+yfit = predict(Geo_Music.qda,newdata=Geo_Music_train)
+attributes(yfit)
+
+misclass(yfit$class,Geo_Music_train$Region)
+
+ypred = predict(Geo_Music.qda,newdata=Geo_Music_test)
+misclass(ypred$class,Geo_Music_test$Region)
+
+```
+
+
+
+### REGULARIZED DISCRIMINANT ANALYSIS
+
+```{r}
+Geo_Music.rda = rda(Region~.,data=Geo_Music_train)
+attributes(Geo_Music.rda)
+
+Geo_Music.rda$regularization # optimal settings for (gamma, lambda) found by 10-fold CV.
+
+Geo_Music.rda.tune = rda(Region~.,data=Geo_Music_train, regularization = Geo_Music.rda$regularization)
+
+ypred = predict(Geo_Music.rda,newdata=Geo_Music_test)
+misclass(ypred$class,Geo_Music_test$Region)
+
+ypred = predict(Geo_Music.rda.tune,newdata=Geo_Music_test)
+misclass(ypred$class,Geo_Music_test$Region)
+
+```
+
+
+#### Visualize in 2D
+
+```{r}
+# visualize boundaries in 2D
+partimat(Region~.,data=Geo_Music_train,method="lda",nplots.hor=3,nplots.ver=3)
+#partimat(Region~.,data=Music_Origin.train,method="qda",nplots.hor=3,nplots.ver=3)
+partimat(Region~.,data=Geo_Music_train,method="rda",nplots.hor=3,nplots.ver=3)
+partimat(Region~.,data=Geo_Music_train,method="knn",nplots.hor=3,nplots.ver=3) # slow!
+partimat(Region~.,data=Geo_Music_train,method="naiveBayes",nplots.hor=3,nplots.ver=3)
+
+```
+
+
